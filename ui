@@ -1,0 +1,940 @@
+--[[
+    ShapeX Terminal API
+    Rayfield-style terminal UI library — self-player scope only.
+    Host on GitHub, loadstring it, then build your terminal with the API below.
+
+    USAGE:
+        local ShapeX = loadstring(game:HttpGet('https://raw.githubusercontent.com/YOU/REPO/main/ShapeXTerminal_API.lua'))()
+
+        local Window = ShapeX:CreateWindow({
+            Name = "cubesscripter",
+            LoadingTitle = "ShapeX Terminal",
+            LoadingSubtitle = "v1.0",
+        })
+
+        local Tab = Window:CreateTab("Movement")
+        Tab:CreateButton({ Name = "Test", Callback = function() end })
+        Tab:CreateToggle({ Name = "Fly", Flag = "fly", Callback = function(v) end })
+        Tab:CreateSlider({ Name = "Speed", Range = {16,200}, CurrentValue = 16, Flag = "speed", Callback = function(v) end })
+        Tab:CreateCommand({ Name = "myCmd", Aliases = {"mc"}, Description = "does a thing", Callback = function(args) end })
+
+        ShapeX:Notify({ Title = "Ready", Content = "Terminal loaded", Duration = 3 })
+]]
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local Camera = workspace.CurrentCamera
+
+--======================================================
+-- THEME
+--======================================================
+local THEME = {
+    Background = Color3.fromRGB(15, 8, 8),
+    Panel = Color3.fromRGB(22, 11, 11),
+    Border = Color3.fromRGB(120, 40, 30),
+    Accent = Color3.fromRGB(255, 180, 0),
+    AccentDim = Color3.fromRGB(200, 40, 20),
+    Text = Color3.fromRGB(240, 230, 210),
+    Dim = Color3.fromRGB(180, 130, 80),
+    Success = Color3.fromRGB(120, 220, 120),
+    Error = Color3.fromRGB(255, 90, 70),
+    Warning = Color3.fromRGB(255, 190, 60),
+    Info = Color3.fromRGB(255, 180, 0),
+    TabActive = Color3.fromRGB(45, 18, 16),
+    TabInactive = Color3.fromRGB(20, 10, 10),
+    ToggleOn = Color3.fromRGB(255, 170, 0),
+    ToggleOff = Color3.fromRGB(80, 30, 30),
+}
+
+local FONT = Enum.Font.Code
+local TEXT_SIZE = 13
+
+--======================================================
+-- ROOT GUI
+--======================================================
+local ShapeX = {}
+ShapeX.Flags = {}
+ShapeX.__index = ShapeX
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "ShapeXTerminal"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = playerGui
+
+--======================================================
+-- HELPERS
+--======================================================
+local function corner(inst, radius)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = radius or UDim.new(0, 4)
+    c.Parent = inst
+    return c
+end
+
+local function stroke(inst, color, thickness)
+    local s = Instance.new("UIStroke")
+    s.Color = color or THEME.Border
+    s.Thickness = thickness or 1
+    s.Parent = inst
+    return s
+end
+
+local function tween(inst, props, time, style, dir)
+    return TweenService:Create(inst, TweenInfo.new(time or 0.2, style or Enum.EasingStyle.Quad, dir or Enum.EasingDirection.Out), props)
+end
+
+--======================================================
+-- NOTIFICATIONS
+--======================================================
+local notifyHolder = Instance.new("Frame")
+notifyHolder.Name = "Notifications"
+notifyHolder.BackgroundTransparency = 1
+notifyHolder.Size = UDim2.fromOffset(280, 400)
+notifyHolder.Position = UDim2.new(1, -292, 1, -412)
+notifyHolder.Parent = screenGui
+
+local notifyLayout = Instance.new("UIListLayout")
+notifyLayout.SortOrder = Enum.SortOrder.LayoutOrder
+notifyLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+notifyLayout.Padding = UDim.new(0, 6)
+notifyLayout.Parent = notifyHolder
+
+function ShapeX:Notify(opts)
+    opts = opts or {}
+    local title = opts.Title or "Notice"
+    local content = opts.Content or ""
+    local duration = opts.Duration or 3
+
+    local card = Instance.new("Frame")
+    card.BackgroundColor3 = THEME.Panel
+    card.Size = UDim2.new(1, 0, 0, 0)
+    card.AutomaticSize = Enum.AutomaticSize.Y
+    card.ClipsDescendants = true
+    card.LayoutOrder = os.clock() * -1
+    card.Parent = notifyHolder
+    corner(card, UDim.new(0, 6))
+    stroke(card, THEME.Border, 1)
+
+    local bar = Instance.new("Frame")
+    bar.BackgroundColor3 = THEME.Accent
+    bar.Size = UDim2.new(0, 3, 1, 0)
+    bar.BorderSizePixel = 0
+    bar.Parent = card
+
+    local pad = Instance.new("Frame")
+    pad.BackgroundTransparency = 1
+    pad.Size = UDim2.new(1, -14, 0, 0)
+    pad.AutomaticSize = Enum.AutomaticSize.Y
+    pad.Position = UDim2.fromOffset(10, 0)
+    pad.Parent = card
+
+    local list = Instance.new("UIListLayout")
+    list.SortOrder = Enum.SortOrder.LayoutOrder
+    list.Padding = UDim.new(0, 2)
+    list.Parent = pad
+
+    local pad2 = Instance.new("UIPadding")
+    pad2.PaddingTop = UDim.new(0, 8)
+    pad2.PaddingBottom = UDim.new(0, 8)
+    pad2.Parent = pad
+
+    local titleLbl = Instance.new("TextLabel")
+    titleLbl.BackgroundTransparency = 1
+    titleLbl.Size = UDim2.new(1, 0, 0, 16)
+    titleLbl.Font = FONT
+    titleLbl.TextSize = TEXT_SIZE
+    titleLbl.TextColor3 = THEME.Accent
+    titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+    titleLbl.Text = title
+    titleLbl.Parent = pad
+
+    local contentLbl = Instance.new("TextLabel")
+    contentLbl.BackgroundTransparency = 1
+    contentLbl.Size = UDim2.new(1, 0, 0, 0)
+    contentLbl.AutomaticSize = Enum.AutomaticSize.Y
+    contentLbl.Font = FONT
+    contentLbl.TextSize = TEXT_SIZE
+    contentLbl.TextColor3 = THEME.Text
+    contentLbl.TextXAlignment = Enum.TextXAlignment.Left
+    contentLbl.TextWrapped = true
+    contentLbl.Text = content
+    contentLbl.Parent = pad
+
+    card.Size = UDim2.new(1, 0, 0, 0)
+    task.delay(duration, function()
+        if card and card.Parent then
+            tween(card, {Size = UDim2.new(1, 0, 0, 0)}, 0.2).Completed:Connect(function()
+                card:Destroy()
+            end)
+            tween(card, {Size = UDim2.new(1, 0, 0, 0)}, 0.2):Play()
+        end
+    end)
+end
+
+--======================================================
+-- WINDOW
+--======================================================
+function ShapeX:CreateWindow(config)
+    config = config or {}
+    local Window = {}
+    Window.Tabs = {}
+    Window.CurrentTab = nil
+
+    local main = Instance.new("Frame")
+    main.Name = "MainWindow"
+    main.Size = UDim2.fromOffset(720, 460)
+    main.AnchorPoint = Vector2.new(0.5, 0.5)
+    main.Position = UDim2.fromScale(0.5, 0.5)
+    main.BackgroundColor3 = THEME.Background
+    main.BorderSizePixel = 0
+    main.ClipsDescendants = true
+    main.Parent = screenGui
+    corner(main, UDim.new(0, 6))
+    stroke(main, THEME.Border, 1)
+
+    -- Title bar
+    local titleBar = Instance.new("Frame", main)
+    titleBar.Size = UDim2.new(1, 0, 0, 30)
+    titleBar.BackgroundColor3 = THEME.Panel
+    titleBar.BorderSizePixel = 0
+
+    local titleLabel = Instance.new("TextLabel", titleBar)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Size = UDim2.new(1, -80, 1, 0)
+    titleLabel.Position = UDim2.fromOffset(12, 0)
+    titleLabel.Font = FONT
+    titleLabel.Text = (config.Name or "shapex") .. "@terminal:~"
+    titleLabel.TextColor3 = THEME.Accent
+    titleLabel.TextSize = TEXT_SIZE
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+    local closeBtn = Instance.new("TextButton", titleBar)
+    closeBtn.Size = UDim2.fromOffset(24, 24)
+    closeBtn.Position = UDim2.new(1, -30, 0, 3)
+    closeBtn.BackgroundColor3 = THEME.Panel
+    closeBtn.Text = "×"
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.TextSize = 16
+    closeBtn.TextColor3 = THEME.Dim
+    closeBtn.AutoButtonColor = false
+
+    local minimizeBtn = Instance.new("TextButton", titleBar)
+    minimizeBtn.Size = UDim2.fromOffset(24, 24)
+    minimizeBtn.Position = UDim2.new(1, -58, 0, 3)
+    minimizeBtn.BackgroundColor3 = THEME.Panel
+    minimizeBtn.Text = "—"
+    minimizeBtn.Font = Enum.Font.GothamBold
+    minimizeBtn.TextSize = 14
+    minimizeBtn.TextColor3 = THEME.Dim
+    minimizeBtn.AutoButtonColor = false
+
+    -- Sidebar (tab list)
+    local sidebar = Instance.new("Frame", main)
+    sidebar.Size = UDim2.new(0, 140, 1, -30)
+    sidebar.Position = UDim2.fromOffset(0, 30)
+    sidebar.BackgroundColor3 = THEME.Panel
+    sidebar.BorderSizePixel = 0
+
+    local sidebarList = Instance.new("UIListLayout", sidebar)
+    sidebarList.SortOrder = Enum.SortOrder.LayoutOrder
+    sidebarList.Padding = UDim.new(0, 2)
+
+    local sidebarPad = Instance.new("UIPadding", sidebar)
+    sidebarPad.PaddingTop = UDim.new(0, 6)
+    sidebarPad.PaddingLeft = UDim.new(0, 4)
+    sidebarPad.PaddingRight = UDim.new(0, 4)
+
+    -- Content area
+    local content = Instance.new("Frame", main)
+    content.Size = UDim2.new(1, -140, 1, -30)
+    content.Position = UDim2.fromOffset(140, 30)
+    content.BackgroundTransparency = 1
+
+    -- Terminal-style output log (bottom, optional, shared across tabs)
+    local logScroll = Instance.new("ScrollingFrame", content)
+    logScroll.Size = UDim2.new(1, -16, 0, 90)
+    logScroll.Position = UDim2.new(0, 8, 1, -98)
+    logScroll.BackgroundColor3 = THEME.Panel
+    logScroll.BorderSizePixel = 0
+    logScroll.ScrollBarThickness = 3
+    logScroll.ScrollBarImageColor3 = THEME.Accent
+    logScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    logScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    corner(logScroll, UDim.new(0, 4))
+    stroke(logScroll, THEME.Border, 1)
+
+    local logContent = Instance.new("Frame", logScroll)
+    logContent.Size = UDim2.new(1, -8, 1, 0)
+    logContent.Position = UDim2.fromOffset(4, 0)
+    logContent.BackgroundTransparency = 1
+    local logLayout = Instance.new("UIListLayout", logContent)
+    logLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+    local function log(text, color)
+        local line = Instance.new("TextLabel", logContent)
+        line.BackgroundTransparency = 1
+        line.Size = UDim2.new(1, 0, 0, 15)
+        line.Font = FONT
+        line.TextSize = 12
+        line.TextColor3 = color or THEME.Text
+        line.TextXAlignment = Enum.TextXAlignment.Left
+        line.Text = text
+        task.wait()
+        logScroll.CanvasPosition = Vector2.new(0, logScroll.CanvasSize.Y.Offset)
+    end
+    Window.Log = log
+
+    -- Command input
+    local cmdFrame = Instance.new("Frame", content)
+    cmdFrame.Size = UDim2.new(1, -16, 0, 22)
+    cmdFrame.Position = UDim2.new(0, 8, 1, -24)
+    cmdFrame.BackgroundColor3 = THEME.Panel
+    cmdFrame.BorderSizePixel = 0
+    corner(cmdFrame, UDim.new(0, 3))
+    stroke(cmdFrame, THEME.Border, 1)
+
+    local cmdPrefix = Instance.new("TextLabel", cmdFrame)
+    cmdPrefix.BackgroundTransparency = 1
+    cmdPrefix.Size = UDim2.fromOffset(18, 22)
+    cmdPrefix.Position = UDim2.fromOffset(6, 0)
+    cmdPrefix.Font = FONT
+    cmdPrefix.TextSize = TEXT_SIZE
+    cmdPrefix.TextColor3 = THEME.Accent
+    cmdPrefix.Text = ">"
+
+    local cmdInput = Instance.new("TextBox", cmdFrame)
+    cmdInput.BackgroundTransparency = 1
+    cmdInput.Position = UDim2.fromOffset(26, 0)
+    cmdInput.Size = UDim2.new(1, -32, 1, 0)
+    cmdInput.Font = FONT
+    cmdInput.TextSize = TEXT_SIZE
+    cmdInput.TextColor3 = THEME.Text
+    cmdInput.TextXAlignment = Enum.TextXAlignment.Left
+    cmdInput.PlaceholderText = "type a command... (help)"
+    cmdInput.PlaceholderColor3 = THEME.Dim
+    cmdInput.ClearTextOnFocus = false
+    cmdInput.Text = ""
+
+    -- Tab pages live above the log
+    local pagesHolder = Instance.new("Frame", content)
+    pagesHolder.Size = UDim2.new(1, -16, 1, -122)
+    pagesHolder.Position = UDim2.fromOffset(8, 0)
+    pagesHolder.BackgroundTransparency = 1
+
+    -- Command registry
+    Window.Commands = {}
+
+    local function registerBuiltinCommand(name, aliases, desc, fn)
+        Window.Commands[name] = {fn = fn, desc = desc, aliases = aliases or {}}
+        for _, a in ipairs(aliases or {}) do
+            Window.Commands[a] = Window.Commands[name]
+        end
+    end
+
+    local function processCommand(raw)
+        if raw == "" then return end
+        log("> " .. raw, THEME.Accent)
+        local parts = {}
+        for p in raw:gmatch("%S+") do table.insert(parts, p) end
+        local cmdName = parts[1]:lower()
+        table.remove(parts, 1)
+
+        if cmdName == "help" then
+            log("Available commands:", THEME.Info)
+            local seen = {}
+            for name, data in pairs(Window.Commands) do
+                if not seen[data] then
+                    seen[data] = true
+                    log("  " .. name .. " - " .. (data.desc or ""), THEME.Text)
+                end
+            end
+            return
+        end
+
+        local cmd = Window.Commands[cmdName]
+        if cmd then
+            local ok, err = pcall(cmd.fn, parts)
+            if not ok then
+                log("  Error: " .. tostring(err), THEME.Error)
+            end
+        else
+            log("  Unknown command: " .. cmdName .. " (try 'help')", THEME.Error)
+        end
+    end
+    Window.RunCommand = processCommand
+
+    cmdInput.FocusLost:Connect(function(enter)
+        if not enter then return end
+        local text = cmdInput.Text
+        cmdInput.Text = ""
+        processCommand(text)
+    end)
+
+    -- Window dragging
+    local dragging, dragStart, startPos = false, nil, nil
+    titleBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = main.Position
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+
+    -- Open/close
+    local isOpen = true
+    local function setOpen(open)
+        isOpen = open
+        if open then
+            main.Visible = true
+            main.Size = UDim2.fromOffset(0, 0)
+            tween(main, {Size = UDim2.fromOffset(720, 460)}, 0.2):Play()
+        else
+            local t = tween(main, {Size = UDim2.fromOffset(0, 0)}, 0.2)
+            t:Play()
+            t.Completed:Wait()
+            main.Visible = false
+        end
+    end
+    closeBtn.MouseButton1Click:Connect(function() setOpen(false) end)
+    minimizeBtn.MouseButton1Click:Connect(function() setOpen(not isOpen) end)
+    UserInputService.InputBegan:Connect(function(input, gp)
+        if gp then return end
+        if input.KeyCode == Enum.KeyCode.RightShift then setOpen(not isOpen) end
+    end)
+
+    --==================================================
+    -- TAB OBJECT
+    --==================================================
+    function Window:CreateTab(name)
+        local Tab = {}
+        Tab.Elements = {}
+
+        local tabBtn = Instance.new("TextButton", sidebar)
+        tabBtn.Size = UDim2.new(1, 0, 0, 28)
+        tabBtn.BackgroundColor3 = THEME.TabInactive
+        tabBtn.Text = "  " .. name
+        tabBtn.Font = FONT
+        tabBtn.TextSize = TEXT_SIZE
+        tabBtn.TextColor3 = THEME.Dim
+        tabBtn.TextXAlignment = Enum.TextXAlignment.Left
+        tabBtn.AutoButtonColor = false
+        corner(tabBtn, UDim.new(0, 4))
+
+        local page = Instance.new("ScrollingFrame", pagesHolder)
+        page.Size = UDim2.new(1, 0, 1, 0)
+        page.BackgroundTransparency = 1
+        page.BorderSizePixel = 0
+        page.ScrollBarThickness = 3
+        page.ScrollBarImageColor3 = THEME.Accent
+        page.CanvasSize = UDim2.new(0, 0, 0, 0)
+        page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        page.Visible = false
+
+        local pageLayout = Instance.new("UIListLayout", page)
+        pageLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        pageLayout.Padding = UDim.new(0, 6)
+
+        local function selectTab()
+            for _, t in ipairs(Window.Tabs) do
+                t.page.Visible = false
+                t.btn.BackgroundColor3 = THEME.TabInactive
+                t.btn.TextColor3 = THEME.Dim
+            end
+            page.Visible = true
+            tabBtn.BackgroundColor3 = THEME.TabActive
+            tabBtn.TextColor3 = THEME.Accent
+            Window.CurrentTab = Tab
+        end
+
+        tabBtn.MouseButton1Click:Connect(selectTab)
+        table.insert(Window.Tabs, {btn = tabBtn, page = page, select = selectTab})
+
+        if #Window.Tabs == 1 then selectTab() end
+
+        --==============================================
+        -- ELEMENT BUILDERS
+        --==============================================
+        function Tab:CreateSection(text)
+            local lbl = Instance.new("TextLabel", page)
+            lbl.BackgroundTransparency = 1
+            lbl.Size = UDim2.new(1, 0, 0, 20)
+            lbl.Font = FONT
+            lbl.TextSize = TEXT_SIZE
+            lbl.TextColor3 = THEME.Accent
+            lbl.TextXAlignment = Enum.TextXAlignment.Left
+            lbl.Text = "── " .. text
+            return lbl
+        end
+
+        function Tab:CreateParagraph(opts)
+            opts = opts or {}
+            local holder = Instance.new("Frame", page)
+            holder.BackgroundColor3 = THEME.Panel
+            holder.Size = UDim2.new(1, 0, 0, 0)
+            holder.AutomaticSize = Enum.AutomaticSize.Y
+            corner(holder, UDim.new(0, 4))
+            stroke(holder)
+
+            local pad = Instance.new("UIPadding", holder)
+            pad.PaddingTop = UDim.new(0, 8); pad.PaddingBottom = UDim.new(0, 8)
+            pad.PaddingLeft = UDim.new(0, 10); pad.PaddingRight = UDim.new(0, 10)
+
+            local list = Instance.new("UIListLayout", holder)
+            list.SortOrder = Enum.SortOrder.LayoutOrder
+            list.Padding = UDim.new(0, 2)
+
+            local title = Instance.new("TextLabel", holder)
+            title.BackgroundTransparency = 1
+            title.Size = UDim2.new(1, 0, 0, 16)
+            title.Font = FONT
+            title.TextSize = TEXT_SIZE
+            title.TextColor3 = THEME.Accent
+            title.TextXAlignment = Enum.TextXAlignment.Left
+            title.Text = opts.Title or ""
+
+            local body = Instance.new("TextLabel", holder)
+            body.BackgroundTransparency = 1
+            body.Size = UDim2.new(1, 0, 0, 0)
+            body.AutomaticSize = Enum.AutomaticSize.Y
+            body.Font = FONT
+            body.TextSize = TEXT_SIZE
+            body.TextColor3 = THEME.Text
+            body.TextXAlignment = Enum.TextXAlignment.Left
+            body.TextWrapped = true
+            body.Text = opts.Content or ""
+            return holder
+        end
+
+        function Tab:CreateButton(opts)
+            opts = opts or {}
+            local btn = Instance.new("TextButton", page)
+            btn.Size = UDim2.new(1, 0, 0, 32)
+            btn.BackgroundColor3 = THEME.Panel
+            btn.Text = opts.Name or "Button"
+            btn.Font = FONT
+            btn.TextSize = TEXT_SIZE
+            btn.TextColor3 = THEME.Text
+            btn.AutoButtonColor = false
+            corner(btn, UDim.new(0, 4))
+            stroke(btn)
+
+            btn.MouseEnter:Connect(function() tween(btn, {BackgroundColor3 = THEME.TabActive}, 0.12):Play() end)
+            btn.MouseLeave:Connect(function() tween(btn, {BackgroundColor3 = THEME.Panel}, 0.12):Play() end)
+            btn.MouseButton1Click:Connect(function()
+                if opts.Callback then
+                    local ok, err = pcall(opts.Callback)
+                    if not ok then log("  Error: " .. tostring(err), THEME.Error) end
+                end
+            end)
+            return btn
+        end
+
+        function Tab:CreateToggle(opts)
+            opts = opts or {}
+            local state = opts.CurrentValue or false
+
+            local holder = Instance.new("TextButton", page)
+            holder.Size = UDim2.new(1, 0, 0, 32)
+            holder.BackgroundColor3 = THEME.Panel
+            holder.Text = ""
+            holder.AutoButtonColor = false
+            corner(holder, UDim.new(0, 4))
+            stroke(holder)
+
+            local lbl = Instance.new("TextLabel", holder)
+            lbl.BackgroundTransparency = 1
+            lbl.Size = UDim2.new(1, -50, 1, 0)
+            lbl.Position = UDim2.fromOffset(10, 0)
+            lbl.Font = FONT
+            lbl.TextSize = TEXT_SIZE
+            lbl.TextColor3 = THEME.Text
+            lbl.TextXAlignment = Enum.TextXAlignment.Left
+            lbl.Text = opts.Name or "Toggle"
+
+            local switch = Instance.new("Frame", holder)
+            switch.Size = UDim2.fromOffset(36, 18)
+            switch.Position = UDim2.new(1, -46, 0.5, -9)
+            switch.BackgroundColor3 = state and THEME.ToggleOn or THEME.ToggleOff
+            corner(switch, UDim.new(1, 0))
+
+            local knob = Instance.new("Frame", switch)
+            knob.Size = UDim2.fromOffset(14, 14)
+            knob.Position = state and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
+            knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+            corner(knob, UDim.new(1, 0))
+
+            local function set(v)
+                state = v
+                if opts.Flag then ShapeX.Flags[opts.Flag] = v end
+                tween(switch, {BackgroundColor3 = state and THEME.ToggleOn or THEME.ToggleOff}, 0.15):Play()
+                tween(knob, {Position = state and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)}, 0.15):Play()
+                if opts.Callback then
+                    local ok, err = pcall(opts.Callback, state)
+                    if not ok then log("  Error: " .. tostring(err), THEME.Error) end
+                end
+            end
+
+            holder.MouseButton1Click:Connect(function() set(not state) end)
+            if state then set(state) end
+            return {Set = set}
+        end
+
+        function Tab:CreateSlider(opts)
+            opts = opts or {}
+            local range = opts.Range or {0, 100}
+            local min, max = range[1], range[2]
+            local value = opts.CurrentValue or min
+            local increment = opts.Increment or 1
+
+            local holder = Instance.new("Frame", page)
+            holder.Size = UDim2.new(1, 0, 0, 42)
+            holder.BackgroundColor3 = THEME.Panel
+            corner(holder, UDim.new(0, 4))
+            stroke(holder)
+
+            local lbl = Instance.new("TextLabel", holder)
+            lbl.BackgroundTransparency = 1
+            lbl.Size = UDim2.new(1, -20, 0, 18)
+            lbl.Position = UDim2.fromOffset(10, 4)
+            lbl.Font = FONT
+            lbl.TextSize = TEXT_SIZE
+            lbl.TextColor3 = THEME.Text
+            lbl.TextXAlignment = Enum.TextXAlignment.Left
+            lbl.Text = (opts.Name or "Slider") .. ": " .. tostring(value) .. (opts.Suffix or "")
+
+            local bar = Instance.new("Frame", holder)
+            bar.Size = UDim2.new(1, -20, 0, 6)
+            bar.Position = UDim2.fromOffset(10, 28)
+            bar.BackgroundColor3 = THEME.ToggleOff
+            corner(bar, UDim.new(1, 0))
+
+            local fill = Instance.new("Frame", bar)
+            fill.Size = UDim2.new((value - min) / (max - min), 0, 1, 0)
+            fill.BackgroundColor3 = THEME.Accent
+            corner(fill, UDim.new(1, 0))
+
+            local dragging = false
+            local function setFromX(xPos)
+                local rel = math.clamp((xPos - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+                local raw = min + (max - min) * rel
+                value = math.clamp(math.floor(raw / increment + 0.5) * increment, min, max)
+                fill.Size = UDim2.new((value - min) / (max - min), 0, 1, 0)
+                lbl.Text = (opts.Name or "Slider") .. ": " .. tostring(value) .. (opts.Suffix or "")
+                if opts.Flag then ShapeX.Flags[opts.Flag] = value end
+                if opts.Callback then
+                    local ok, err = pcall(opts.Callback, value)
+                    if not ok then log("  Error: " .. tostring(err), THEME.Error) end
+                end
+            end
+
+            bar.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                    dragging = true
+                    setFromX(input.Position.X)
+                end
+            end)
+            UserInputService.InputChanged:Connect(function(input)
+                if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+                    setFromX(input.Position.X)
+                end
+            end)
+            UserInputService.InputEnded:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                    dragging = false
+                end
+            end)
+            return {Set = setFromX}
+        end
+
+        function Tab:CreateDropdown(opts)
+            opts = opts or {}
+            local options = opts.Options or {}
+            local current = (opts.CurrentOption and opts.CurrentOption[1]) or options[1] or ""
+            local open = false
+
+            local holder = Instance.new("TextButton", page)
+            holder.Size = UDim2.new(1, 0, 0, 32)
+            holder.BackgroundColor3 = THEME.Panel
+            holder.Text = ""
+            holder.AutoButtonColor = false
+            corner(holder, UDim.new(0, 4))
+            stroke(holder)
+
+            local lbl = Instance.new("TextLabel", holder)
+            lbl.BackgroundTransparency = 1
+            lbl.Size = UDim2.new(1, -20, 1, 0)
+            lbl.Position = UDim2.fromOffset(10, 0)
+            lbl.Font = FONT
+            lbl.TextSize = TEXT_SIZE
+            lbl.TextColor3 = THEME.Text
+            lbl.TextXAlignment = Enum.TextXAlignment.Left
+            lbl.Text = (opts.Name or "Dropdown") .. ": " .. current
+
+            local list = Instance.new("Frame", page)
+            list.Size = UDim2.new(1, 0, 0, 0)
+            list.AutomaticSize = Enum.AutomaticSize.Y
+            list.BackgroundColor3 = THEME.Panel
+            list.Visible = false
+            corner(list, UDim.new(0, 4))
+            stroke(list)
+            local listLayout = Instance.new("UIListLayout", list)
+            listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+            for _, optName in ipairs(options) do
+                local optBtn = Instance.new("TextButton", list)
+                optBtn.Size = UDim2.new(1, 0, 0, 26)
+                optBtn.BackgroundColor3 = THEME.Panel
+                optBtn.Text = "  " .. optName
+                optBtn.Font = FONT
+                optBtn.TextSize = TEXT_SIZE
+                optBtn.TextColor3 = THEME.Text
+                optBtn.TextXAlignment = Enum.TextXAlignment.Left
+                optBtn.AutoButtonColor = false
+                optBtn.MouseEnter:Connect(function() optBtn.BackgroundColor3 = THEME.TabActive end)
+                optBtn.MouseLeave:Connect(function() optBtn.BackgroundColor3 = THEME.Panel end)
+                optBtn.MouseButton1Click:Connect(function()
+                    current = optName
+                    lbl.Text = (opts.Name or "Dropdown") .. ": " .. current
+                    list.Visible = false
+                    open = false
+                    if opts.Flag then ShapeX.Flags[opts.Flag] = current end
+                    if opts.Callback then
+                        local ok, err = pcall(opts.Callback, current)
+                        if not ok then log("  Error: " .. tostring(err), THEME.Error) end
+                    end
+                end)
+            end
+
+            holder.MouseButton1Click:Connect(function()
+                open = not open
+                list.Visible = open
+            end)
+            return {Set = function(v) current = v; lbl.Text = (opts.Name or "Dropdown") .. ": " .. v end}
+        end
+
+        -- Register a terminal command tied to this tab
+        function Tab:CreateCommand(opts)
+            opts = opts or {}
+            local name = (opts.Name or "cmd"):lower()
+            registerBuiltinCommand(name, opts.Aliases, opts.Description or "", opts.Callback or function() end)
+            return name
+        end
+
+        return Tab
+    end
+
+    --==================================================
+    -- BUILT-IN SELF-ONLY COMMANDS
+    --==================================================
+    local flying, flySpeed = false, 50
+    local flyConn
+    registerBuiltinCommand("fly", {}, "toggle flight [speed]", function(args)
+        flying = not flying
+        if flying then
+            flySpeed = tonumber(args[1]) or flySpeed
+            local char = player.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            local hum = char and char:FindFirstChild("Humanoid")
+            if not (hrp and hum) then return end
+            hum.PlatformStand = true
+            flyConn = RunService.Heartbeat:Connect(function()
+                if not flying then return end
+                local vel = Vector3.new()
+                if UserInputService:IsKeyDown(Enum.KeyCode.W) then vel += Camera.CFrame.LookVector * flySpeed end
+                if UserInputService:IsKeyDown(Enum.KeyCode.S) then vel -= Camera.CFrame.LookVector * flySpeed end
+                if UserInputService:IsKeyDown(Enum.KeyCode.A) then vel -= Camera.CFrame.RightVector * flySpeed end
+                if UserInputService:IsKeyDown(Enum.KeyCode.D) then vel += Camera.CFrame.RightVector * flySpeed end
+                if UserInputService:IsKeyDown(Enum.KeyCode.Space) then vel += Vector3.new(0, flySpeed, 0) end
+                if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then vel -= Vector3.new(0, flySpeed, 0) end
+                hrp.Velocity = vel
+            end)
+            log("  Fly enabled (speed " .. flySpeed .. ")", THEME.Success)
+        else
+            if flyConn then flyConn:Disconnect() end
+            local char = player.Character
+            if char and char:FindFirstChild("Humanoid") then char.Humanoid.PlatformStand = false end
+            log("  Fly disabled", THEME.Error)
+        end
+    end)
+
+    local noclipping, noclipConn = false, nil
+    registerBuiltinCommand("noclip", {}, "toggle noclip", function()
+        noclipping = not noclipping
+        if noclipping then
+            noclipConn = RunService.Stepped:Connect(function()
+                local char = player.Character
+                if char then
+                    for _, part in ipairs(char:GetDescendants()) do
+                        if part:IsA("BasePart") then part.CanCollide = false end
+                    end
+                end
+            end)
+            log("  Noclip enabled", THEME.Success)
+        else
+            if noclipConn then noclipConn:Disconnect() end
+            log("  Noclip disabled", THEME.Error)
+        end
+    end)
+
+    registerBuiltinCommand("speed", {"ws"}, "set walkspeed [n]", function(args)
+        local n = tonumber(args[1])
+        local hum = player.Character and player.Character:FindFirstChild("Humanoid")
+        if n and hum then hum.WalkSpeed = n; log("  WalkSpeed set to " .. n, THEME.Success)
+        else log("  Usage: speed [number]", THEME.Warning) end
+    end)
+
+    registerBuiltinCommand("jump", {"jp"}, "set jump power [n]", function(args)
+        local n = tonumber(args[1])
+        local hum = player.Character and player.Character:FindFirstChild("Humanoid")
+        if n and hum then hum.JumpPower = n; log("  JumpPower set to " .. n, THEME.Success)
+        else log("  Usage: jump [number]", THEME.Warning) end
+    end)
+
+    local godmode = false
+    local godConn
+    registerBuiltinCommand("godmode", {"god"}, "toggle invincibility", function()
+        godmode = not godmode
+        if godmode then
+            godConn = RunService.Stepped:Connect(function()
+                local hum = player.Character and player.Character:FindFirstChild("Humanoid")
+                if hum then hum.Health = hum.MaxHealth end
+            end)
+            log("  Godmode enabled", THEME.Success)
+        else
+            if godConn then godConn:Disconnect() end
+            log("  Godmode disabled", THEME.Error)
+        end
+    end)
+
+    local infJump, infJumpConn = false, nil
+    registerBuiltinCommand("infjump", {}, "toggle infinite jump", function()
+        infJump = not infJump
+        if infJump then
+            infJumpConn = UserInputService.JumpRequest:Connect(function()
+                local hum = player.Character and player.Character:FindFirstChild("Humanoid")
+                if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+            end)
+            log("  Infinite jump enabled", THEME.Success)
+        else
+            if infJumpConn then infJumpConn:Disconnect() end
+            log("  Infinite jump disabled", THEME.Error)
+        end
+    end)
+
+    local bhop, bhopConn = false, nil
+    registerBuiltinCommand("bhop", {}, "toggle auto bunny hop", function()
+        bhop = not bhop
+        if bhop then
+            bhopConn = RunService.Heartbeat:Connect(function()
+                local hum = player.Character and player.Character:FindFirstChild("Humanoid")
+                if hum and hum.MoveDirection.Magnitude > 0 and hum:GetState() == Enum.HumanoidStateType.Running then
+                    hum:ChangeState(Enum.HumanoidStateType.Jumping)
+                end
+            end)
+            log("  Bhop enabled", THEME.Success)
+        else
+            if bhopConn then bhopConn:Disconnect() end
+            log("  Bhop disabled", THEME.Error)
+        end
+    end)
+
+    local antiafk, antiafkConn = false, nil
+    registerBuiltinCommand("antiafk", {}, "toggle anti-afk", function()
+        antiafk = not antiafk
+        if antiafk then
+            antiafkConn = player.Idled:Connect(function()
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.new())
+            end)
+            log("  Anti-AFK enabled", THEME.Success)
+        else
+            if antiafkConn then antiafkConn:Disconnect() end
+            log("  Anti-AFK disabled", THEME.Error)
+        end
+    end)
+
+    registerBuiltinCommand("fov", {}, "set camera fov [n]", function(args)
+        local n = tonumber(args[1])
+        if n then Camera.FieldOfView = n; log("  FOV set to " .. n, THEME.Success)
+        else log("  Usage: fov [number]", THEME.Warning) end
+    end)
+
+    registerBuiltinCommand("gravity", {}, "set workspace gravity [n]", function(args)
+        local n = tonumber(args[1])
+        if n then workspace.Gravity = n; log("  Gravity set to " .. n, THEME.Success)
+        else log("  Usage: gravity [number]", THEME.Warning) end
+    end)
+
+    registerBuiltinCommand("hipheight", {"hip"}, "set hip height [n]", function(args)
+        local n = tonumber(args[1])
+        local hum = player.Character and player.Character:FindFirstChild("Humanoid")
+        if n and hum then hum.HipHeight = n; log("  HipHeight set to " .. n, THEME.Success)
+        else log("  Usage: hipheight [number]", THEME.Warning) end
+    end)
+
+    registerBuiltinCommand("sit", {}, "force character to sit", function()
+        local hum = player.Character and player.Character:FindFirstChild("Humanoid")
+        if hum then hum.Sit = true; log("  Sitting", THEME.Success) end
+    end)
+
+    registerBuiltinCommand("laydown", {}, "force character to lay down", function()
+        local hum = player.Character and player.Character:FindFirstChild("Humanoid")
+        if hum then hum:ChangeState(Enum.HumanoidStateType.Physics); log("  Laying down", THEME.Success) end
+    end)
+
+    registerBuiltinCommand("day", {}, "set time to day", function() Lighting.ClockTime = 12; log("  Time set to day", THEME.Success) end)
+    registerBuiltinCommand("night", {}, "set time to night", function() Lighting.ClockTime = 0; log("  Time set to night", THEME.Success) end)
+    registerBuiltinCommand("time", {}, "set clock time [0-24]", function(args)
+        local n = tonumber(args[1])
+        if n then Lighting.ClockTime = n; log("  Time set to " .. n, THEME.Success)
+        else log("  Usage: time [0-24]", THEME.Warning) end
+    end)
+    registerBuiltinCommand("nofog", {}, "remove fog", function() Lighting.FogEnd = 1000000; log("  Fog removed", THEME.Success) end)
+
+    local fullbright, fullbrightConn = false, nil
+    registerBuiltinCommand("fullbright", {}, "toggle fullbright lighting", function()
+        fullbright = not fullbright
+        if fullbright then
+            fullbrightConn = RunService.Heartbeat:Connect(function()
+                Lighting.Brightness = 2
+                Lighting.ClockTime = 14
+                Lighting.FogEnd = 100000
+                Lighting.GlobalShadows = false
+            end)
+            log("  Fullbright enabled", THEME.Success)
+        else
+            if fullbrightConn then fullbrightConn:Disconnect() end
+            log("  Fullbright disabled", THEME.Error)
+        end
+    end)
+
+    registerBuiltinCommand("clear", {"cls"}, "clear terminal log", function()
+        for _, child in ipairs(logContent:GetChildren()) do
+            if not child:IsA("UIListLayout") then child:Destroy() end
+        end
+    end)
+
+    log("ShapeX Terminal loaded. Type 'help' for commands.", THEME.Dim)
+
+    return Window
+end
+
+return ShapeX
